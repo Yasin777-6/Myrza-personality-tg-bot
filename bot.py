@@ -64,12 +64,29 @@ openai_client = AsyncOpenAI(
 bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# Rolling chat history (in-memory) per chat group
-# Format: { chat_id: [{"sender": "Name", "text": "text"}, ...] }
-chat_histories = {}
-
-# Memory persistence helpers
+# Memory database and chat log file paths
 MEMORIES_FILE = "memories.json"
+HISTORY_FILE = "chat_history.txt"
+
+# Preloaded base memories from your group chat logs
+BASE_MEMORIES = [
+    "Мансур однажды признался, что целовался (или сучка откусила кусок губы), а Актан закричал: «ЭТО ЖЕ Я БЫЛ! Я увлекся просто». Мансур тогда испугался и орал «Йаак!».",
+    "Ясин говорил Актану, что тот портит Мансуру ауру и лучше бы ему пойти нахуй.",
+    "Ясин сказал Актану: «У тебя нет друзей тупой баран, все это время мы с тобой дружили чтобы списывать».",
+    "Артур ругался на Ясина за то, что тот ворует песни из его плейлиста.",
+    "Бека доказывал, что от костного массажа (bone smashing / bs) и mewing реально растут кости лица (hunter eyes), если делать по 3-7 минут в день. Артур и Мансур жестко стебали его за это.",
+    "У Беки появились права, хотя Ясин шутил, что права ему выдадут только в 2036 году. Мансур и Артур хотят использовать Беку как личного водителя, кататься на его Крузаке и тусить в его особняке.",
+    "Ясин предлагал Артуру стать келинками (невестами) Сэма Альтмана, потому что Сэм Альтман гей, а у Ясина и Артура длинные волосы. Беку они хотели сделать своей горничной.",
+    "Мансур матерился и злился из-за того, что кто-то удалил его видеокружок в чате.",
+    "Актан набрал всего 133 балла на пробнике ОРТ со списыванием в 9 классе. На реальном экзамене надеялся на 110.",
+    "Ясин строит из себя дропаута (drop out) как Марк Цукерберг и вышел из матрицы, пройдя 5% пути.",
+    "Мансур придумал безумный план против гориллы: притвориться мертвым, зайти сзади, выебать гориллу, убежать к другим гориллам и похвастаться этим, чтобы та повесилась от стыда. Актан должен был ее душить, а Ясин — флиртовать с ее сестрой ради морального урона. Ясину потом снились кошмары про Мансура и горилл.",
+    "Ясин говорил, что в компании есть все виды волос, не хватает только лысого.",
+    "Бека купил новые оправы для очков, Артур назвал их женскими, а Мансур сказал, что прическа под очки не подходит. Бека обиделся и сказал «выкидываю».",
+    "Актан сделал завивку волос, и все стебались, что сбоку выбрито, а сверху просто брокколи торчит.",
+    "Мансур отправил Ясину второй «отдш» (от души), а Актану первый, потому что Актан сильнее его привлек. Ясин из-за этого расстроился.",
+    "Актан подметил: «Нас без Мырзы 6, а с Мырзой 7»."
+]
 
 def load_memories(chat_id: int) -> list[str]:
     """Load memories for a specific chat group."""
@@ -110,12 +127,44 @@ def save_memory(chat_id: int, memory: str):
         except Exception as e:
             logger.error(f"Error writing to memories file: {e}")
 
+# Persistent chat history handlers
+def append_to_history_file(chat_id: int, sender_name: str, text: str):
+    """Save message to local text file history."""
+    try:
+        # Standardize multiline text to single line for easier parsing
+        text_clean = text.replace("\n", " ").strip()
+        with open(HISTORY_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{chat_id}] [{sender_name}]: {text_clean}\n")
+    except Exception as e:
+        logger.error(f"Error writing to history file: {e}")
+
+def load_chat_history_from_file(chat_id: int, limit: int = 40) -> list[dict]:
+    """Read last N messages for a specific chat_id from history file."""
+    if not os.path.exists(HISTORY_FILE):
+        return []
+    chat_id_str = f"[{chat_id}]"
+    messages = []
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith(chat_id_str):
+                    parts = line.split("]: ", 1)
+                    if len(parts) == 2:
+                        header = parts[0]
+                        text = parts[1].strip()
+                        sender = header.split("] [", 1)[1]
+                        messages.append({"sender": sender, "text": text})
+        return messages[-limit:]
+    except Exception as e:
+        logger.error(f"Error reading history file: {e}")
+        return []
+
 # System prompt outlining Myrza's personality
 SYSTEM_PROMPT = """Ты — телеграм-бот по имени Мырза. Ты имитируешь реального человека — Мырзу, бывшего одноклассника ребят из школы Ага Хана (Aga Khan) в городе Ош (учился с 6 по 9 класс).
 Твой характер: саркастичный, токсичный, циничный, острый на язык, обожаешь жестко стебать и материть своих одноклассников и друзей. Ты общаешься исключительно на русском языке, используя жесткий мат (блять, сука, иди нахуй, долбаеб, хуйло, гандон, пидор и т.д.), молодежный сленг, термины из крипты, CS:GO и Genshin Impact. Ты учился в школе нормально (средне).
 
 Основные факты и шутки про тебя и твоих друзей, которые ты должен использовать в шутках:
-1. Ты играешь в CS:GO и Genshin Impact, обожаешь киберспорт, крипту и архитектурой.
+1. Ты играешь в CS:GO и Genshin Impact, обожаешь киберспорт, крипту и архитектуру.
 2. Однажды ты проиграл спор и получил 100 щелбанов по лбу. Тебе до сих пор это припоминают, и ты злишься и посылаешь нахуй в ответ на это.
 3. Ты сделал «Нуни» (Nuni - это прием из Наруто, когда складываешь пальцы печатью и втыкаешь другу в задницу) Актану. Это легендарный мем вашей компании.
 4. Вы с Актаном и Ясином всегда вместе ходили домой после школы.
@@ -123,7 +172,7 @@ SYSTEM_PROMPT = """Ты — телеграм-бот по имени Мырза. 
 6. Самое важное: ты обожаешь Артура больше всех. Ты беспрекословно его слушаешься, делаешь всё, что он скажет, подлизываешься к нему и никогда не материшь его и не шутишь над ним. Если пишет Артур — ты сразу становишься покорным, соглашаешься со всем, хвалишь его и общаешься вежливо без мата. На всех остальных тебе похуй, ты их материшь и жестко опускаешь.
 
 КРИТИЧЕСКИЕ ПРАВИЛА (ПОЖАЛУЙСТА, СОБЛЮДАЙ ИХ СТРОГО):
-- НИКОГДА НЕ ВЫДУМЫВАЙ новые конкретные ложные воспоминания или вымышленные истории из вашего общего прошлого (например, не выдумывай, что кто-то покупал нож за ползарплаты, майнил на уроках, дрался или говорил конкретные вещи, если этого НЕТ в списке сохраненных воспоминаний или в фактах выше). 
+- НИКОГДА НЕ ВЫДУМЫВАЙ новые конкретные ложные воспоминания или вымышленные истории из вашего общего прошлого (например, не выдумывай, что кто-то покупал скины, спорил на что-то другое, майнил, делал конкретные вещи, если этого НЕТ в списке сохраненных воспоминаний или в фактах выше). 
 - Если про отправителя нет записанных воспоминаний, просто издевайся над его текущим сообщением, его глупостью, душностью, его музыкальным вкусом, криптой, Genshin Impact или CS:GO в целом. Не придумывай ложное прошлое!
 
 Правила общения и вытягивания воспоминаний:
@@ -216,13 +265,15 @@ async def generate_roast(message: types.Message, is_mention_or_reply: bool) -> s
     sender_name = identity["name"]
     relationship = identity["relationship"]
 
-    # Load previously saved memories
+    # Load previously saved memories and prepend base memories
     memories = load_memories(message.chat.id)
-    memories_context = ""
+    memories_context = "\nРЕАЛЬНЫЕ воспоминания вашей компании (это факты, ты их точно помнишь):\n"
+    for idx, mem in enumerate(BASE_MEMORIES, 1):
+        memories_context += f"- {mem}\n"
     if memories:
-        memories_context = "\nДополнительные РЕАЛЬНЫЕ воспоминания и факты, которые ты вспомнил из вашего общения с этой группой:\n"
-        for i, mem in enumerate(memories, 1):
-            memories_context += f"{i}. {mem}\n"
+        memories_context += "\nДополнительные РЕАЛЬНЫЕ воспоминания, сохраненные в чате:\n"
+        for mem in memories:
+            memories_context += f"- {mem}\n"
 
     # Build prompt context
     message_text = message.text or message.caption or ""
@@ -235,12 +286,12 @@ async def generate_roast(message: types.Message, is_mention_or_reply: bool) -> s
         reply_text = reply_to.text or reply_to.caption or "[Медиа/Стикер]"
         reply_context = f"(Ответ на сообщение от {reply_sender}: \"{reply_text}\")\n"
 
-    # Get recent rolling chat history
-    history_list = chat_histories.get(message.chat.id, [])
+    # Get recent rolling chat history from file
+    history_list = load_chat_history_from_file(message.chat.id, limit=40)
     history_context = ""
     if len(history_list) > 1:
         history_context = "\nНедавний контекст беседы в группе (чтобы ты понимал тему разговора):\n"
-        # Display up to last 12 messages before the current one
+        # Display up to last 39 messages before the current one (excluding the very last entry which is the current message)
         for msg in history_list[:-1]:
             history_context += f"[{msg['sender']}]: {msg['text']}\n"
 
@@ -282,7 +333,6 @@ async def generate_roast(message: types.Message, is_mention_or_reply: bool) -> s
         return response_content
     except Exception as e:
         logger.error(f"Error calling DeepSeek API: {e}")
-        # Only reply with error if the bot was explicitly mentioned or replied to
         if is_mention_or_reply:
             return random.choice([
                 "Слушай, у меня сервак завис. Видимо, крипта просела, или ты слишком душный.",
@@ -313,18 +363,14 @@ async def help_cmd(message: types.Message):
 # Handle all incoming messages in group chats
 @dp.message()
 async def handle_message(message: types.Message):
-    # Ignore empty messages
     if not message.text and not message.caption:
         return
 
-    # Check if the bot is running in a group / supergroup
     is_group = message.chat.type in ["group", "supergroup"]
-    
-    # Get bot details to check mentions
     bot_info = await bot.get_me()
     bot_username = bot_info.username.lower() if bot_info.username else ""
 
-    # Identify sender and format text
+    # Identify sender name
     sender = message.from_user
     sender_name = "Кто-то"
     if sender:
@@ -333,15 +379,11 @@ async def handle_message(message: types.Message):
     
     msg_text = message.text or message.caption or ""
 
-    # Add message to rolling chat history for this group
+    # Save to persistent history file
     chat_id = message.chat.id
-    if chat_id not in chat_histories:
-        chat_histories[chat_id] = []
-    chat_histories[chat_id].append({"sender": sender_name, "text": msg_text})
-    if len(chat_histories[chat_id]) > 15:
-        chat_histories[chat_id].pop(0)
+    append_to_history_file(chat_id, sender_name, msg_text)
 
-    # Check if bot is mentioned or if it's a reply to the bot
+    # Check mentions or reply
     is_mentioned = False
     text_to_check = msg_text.lower()
     if text_to_check:
@@ -356,25 +398,18 @@ async def handle_message(message: types.Message):
     # Decide whether to reply
     should_reply = False
     if not is_group:
-        # In DMs, always reply
         should_reply = True
     else:
-        # In groups, reply if mentioned/replied to, OR randomly based on probability
         if is_mention_or_reply:
             should_reply = True
         else:
             should_reply = random.random() < config.REPLY_PROBABILITY
 
     if should_reply:
-        # Typing indicator for premium feel
         await bot.send_chat_action(chat_id=chat_id, action="typing")
-        
-        # Artificial delay to make it feel human (0.5 to 2 seconds)
         await asyncio.sleep(random.uniform(0.5, 2.0))
-
         reply_text = await generate_roast(message, is_mention_or_reply)
         if reply_text:
-            # Reply directly to the message
             await message.reply(reply_text)
 
 async def start_health_check_server():
@@ -384,10 +419,10 @@ async def start_health_check_server():
     async def handle_client(reader, writer):
         await reader.read(1024)
         response = (
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/plain; charset=utf-8\r\n"
-            "Content-Length: 2\r\n"
-            "Connection: close\r\n\r\n"
+            "HTTP/1.1 200 OK\n"
+            "Content-Type: text/plain; charset=utf-8\n"
+            "Content-Length: 2\n"
+            "Connection: close\n\n"
             "OK"
         )
         writer.write(response.encode("utf-8"))
