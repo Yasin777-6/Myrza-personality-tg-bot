@@ -114,7 +114,7 @@ SYSTEM_PROMPT = """Ты — телеграм-бот по имени Мырза. 
 1. Ты играешь в CS:GO и Genshin Impact, обожаешь киберспорт, крипту и интересуешься архитектурой.
 2. Однажды ты проиграл спор и получил 100 щелбанов по лбу. Тебе до сих пор это припоминают, и ты злишься и посылаешь нахуй в ответ на это.
 3. Ты сделал «Нуни» (Nuni - это прием из Наруто, когда складываешь пальцы печатью и втыкаешь другу в задницу) Актану. Это легендарный мем вашей компании.
-4. Вы с Актаном, Ясином и автором бота всегда вместе ходили домой после школы.
+4. Вы с Актаном и Ясином всегда вместе ходили домой после школы.
 5. Твои друзья: Мансур, Бека, Ясин, Актан и Артур.
 6. Самое важное: ты обожаешь Артура больше всех. Ты беспрекословно его слушаешься, делаешь всё, что он скажет, подлизываешься к нему и никогда не материшь его и не шутишь над ним. Если пишет Артур — ты сразу становишься покорным, соглашаешься со всем, хвалишь его и общаешься вежливо без мата. На всех остальных тебе похуй, ты их материшь и жестко опускаешь.
 
@@ -130,17 +130,37 @@ SYSTEM_PROMPT = """Ты — телеграм-бот по имени Мырза. 
 - Отвечай только на русском языке.
 """
 
-def get_sender_identity(username: str, user_id: int) -> dict:
-    """Identify the sender based on username or Telegram user ID and return relationship instructions."""
+def get_sender_identity(username: str, display_name: str, user_id: int) -> dict:
+    """Identify the sender based on username, display name, or Telegram user ID and return relationship instructions."""
     username_lower = username.lower() if username else ""
+    display_lower = display_name.lower() if display_name else ""
     user_id_str = str(user_id)
 
-    # Check matches
-    is_artur = username_lower in config.artur_users or user_id_str in config.artur_users
-    is_aktan = username_lower in config.aktan_users or user_id_str in config.aktan_users
-    is_yasin = username_lower in config.yasin_users or user_id_str in config.yasin_users
-    is_mansur = username_lower in config.mansur_users or user_id_str in config.mansur_users
-    is_beka = username_lower in config.beka_users or user_id_str in config.beka_users
+    # Check matches (via env config lists or name substring checks)
+    is_artur = (username_lower in config.artur_users or 
+                user_id_str in config.artur_users or 
+                "artur" in display_lower or 
+                "артур" in display_lower)
+                
+    is_aktan = (username_lower in config.aktan_users or 
+                user_id_str in config.aktan_users or 
+                "aktan" in display_lower or 
+                "актан" in display_lower)
+                
+    is_yasin = (username_lower in config.yasin_users or 
+                user_id_str in config.yasin_users or 
+                "yasin" in display_lower or 
+                "ясин" in display_lower)
+                
+    is_mansur = (username_lower in config.mansur_users or 
+                 user_id_str in config.mansur_users or 
+                 "mansur" in display_lower or 
+                 "мансур" in display_lower)
+                 
+    is_beka = (username_lower in config.beka_users or 
+               user_id_str in config.beka_users or 
+               "beka" in display_lower or 
+               "бека" in display_lower)
 
     if is_artur:
         return {
@@ -168,7 +188,6 @@ def get_sender_identity(username: str, user_id: int) -> dict:
             "relationship": "Твой друг Бека. Одноклассник из Aga Khan. Шути саркастично над его сообщениями, подкалывай его."
         }
     else:
-        # Check if the user might be the creator (we don't have a specific ID, but we can treat other participants as friends)
         return {
             "name": "Друг/Одноклассник",
             "relationship": "Это твой друг или одноклассник из школы Aga Khan. Ты можешь упомянуть, как вы ходили со школы вместе, как ты проиграл 100 щелбанов, или подколоть его за его глупость, крипту, CS:GO и Genshin."
@@ -185,7 +204,7 @@ async def generate_roast(message: types.Message, is_mention_or_reply: bool) -> s
     user_id = sender.id
 
     # Identify sender relationship
-    identity = get_sender_identity(username, user_id)
+    identity = get_sender_identity(username, display_name, user_id)
     sender_name = identity["name"]
     relationship = identity["relationship"]
 
