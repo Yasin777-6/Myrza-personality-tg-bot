@@ -1,3 +1,13 @@
+---
+title: Myrza
+emoji: 🤖
+colorFrom: red
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Telegram Bot "Мырза" (Myrza)
 
 Это Telegram-бот на Python, который имитирует твоего саркастичного одноклассника **Мырзу** (учился в школе Ага Хана в Оше, с 6 по 9 класс). Он общается на русском языке, обожает CS:GO, Genshin Impact, крипту и архитектуру, и безбожно стебет участников группы.
