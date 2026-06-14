@@ -322,6 +322,32 @@ async def handle_message(message: types.Message):
             # Reply directly to the message
             await message.reply(reply_text)
 
+async def start_health_check_server():
+    """Start a simple HTTP server to satisfy Render/Koyeb health checks."""
+    port = int(os.getenv("PORT", "8080"))
+    
+    async def handle_client(reader, writer):
+        await reader.read(1024)
+        response = (
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain; charset=utf-8\r\n"
+            "Content-Length: 2\r\n"
+            "Connection: close\r\n\r\n"
+            "OK"
+        )
+        writer.write(response.encode("utf-8"))
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    try:
+        server = await asyncio.start_server(handle_client, "0.0.0.0", port)
+        logger.info(f"Health check server running on port {port}")
+        async with server:
+            await server.serve_forever()
+    except Exception as e:
+        logger.error(f"Failed to start health check server: {e}")
+
 # Bot startup entrypoint
 async def main():
     if not config.TELEGRAM_BOT_TOKEN or not config.DEEPSEEK_API_KEY:
@@ -329,6 +355,11 @@ async def main():
         return
 
     logger.info("Starting Telegram Bot Myrza...")
+    
+    # Start health check server if PORT is set (typical for Render/Heroku/Koyeb)
+    if os.getenv("PORT"):
+        asyncio.create_task(start_health_check_server())
+
     try:
         # Skip accumulated updates on startup
         await bot.delete_webhook(drop_pending_updates=True)
