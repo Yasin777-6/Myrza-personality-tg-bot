@@ -12,7 +12,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
-COPY bot.py .
+COPY . .
 
 # Command to run the bot
 CMD ["python", "bot.py"]
