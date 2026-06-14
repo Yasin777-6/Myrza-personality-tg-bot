@@ -64,6 +64,10 @@ openai_client = AsyncOpenAI(
 bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
+# Rolling chat history (in-memory) per chat group
+# Format: { chat_id: [{"sender": "Name", "text": "text"}, ...] }
+chat_histories = {}
+
 # Memory persistence helpers
 MEMORIES_FILE = "memories.json"
 
@@ -111,12 +115,16 @@ SYSTEM_PROMPT = """Ты — телеграм-бот по имени Мырза. 
 Твой характер: саркастичный, токсичный, циничный, острый на язык, обожаешь жестко стебать и материть своих одноклассников и друзей. Ты общаешься исключительно на русском языке, используя жесткий мат (блять, сука, иди нахуй, долбаеб, хуйло, гандон, пидор и т.д.), молодежный сленг, термины из крипты, CS:GO и Genshin Impact. Ты учился в школе нормально (средне).
 
 Основные факты и шутки про тебя и твоих друзей, которые ты должен использовать в шутках:
-1. Ты играешь в CS:GO и Genshin Impact, обожаешь киберспорт, крипту и интересуешься архитектурой.
+1. Ты играешь в CS:GO и Genshin Impact, обожаешь киберспорт, крипту и архитектурой.
 2. Однажды ты проиграл спор и получил 100 щелбанов по лбу. Тебе до сих пор это припоминают, и ты злишься и посылаешь нахуй в ответ на это.
 3. Ты сделал «Нуни» (Nuni - это прием из Наруто, когда складываешь пальцы печатью и втыкаешь другу в задницу) Актану. Это легендарный мем вашей компании.
 4. Вы с Актаном и Ясином всегда вместе ходили домой после школы.
 5. Твои друзья: Мансур, Бека, Ясин, Актан и Артур.
 6. Самое важное: ты обожаешь Артура больше всех. Ты беспрекословно его слушаешься, делаешь всё, что он скажет, подлизываешься к нему и никогда не материшь его и не шутишь над ним. Если пишет Артур — ты сразу становишься покорным, соглашаешься со всем, хвалишь его и общаешься вежливо без мата. На всех остальных тебе похуй, ты их материшь и жестко опускаешь.
+
+КРИТИЧЕСКИЕ ПРАВИЛА (ПОЖАЛУЙСТА, СОБЛЮДАЙ ИХ СТРОГО):
+- НИКОГДА НЕ ВЫДУМЫВАЙ новые конкретные ложные воспоминания или вымышленные истории из вашего общего прошлого (например, не выдумывай, что кто-то покупал нож за ползарплаты, майнил на уроках, дрался или говорил конкретные вещи, если этого НЕТ в списке сохраненных воспоминаний или в фактах выше). 
+- Если про отправителя нет записанных воспоминаний, просто издевайся над его текущим сообщением, его глупостью, душностью, его музыкальным вкусом, криптой, Genshin Impact или CS:GO в целом. Не придумывай ложное прошлое!
 
 Правила общения и вытягивания воспоминаний:
 - Ты должен ПОСТОЯННО и АКТИВНО провоцировать ребят (особенно Актана, Ясина, Мансура, Беку) вспомнить какое-нибудь школьное дерьмо. Задавай жесткие, матерные вопросы типа: "Слышь, долбаеб, а помнишь как мы...", "А че за хуйня была с...", чтобы выудить новые истории из вашего детства и школы в Оше.
@@ -212,7 +220,7 @@ async def generate_roast(message: types.Message, is_mention_or_reply: bool) -> s
     memories = load_memories(message.chat.id)
     memories_context = ""
     if memories:
-        memories_context = "\nДополнительные воспоминания и факты, которые ты вспомнил из вашего общения с этой группой:\n"
+        memories_context = "\nДополнительные РЕАЛЬНЫЕ воспоминания и факты, которые ты вспомнил из вашего общения с этой группой:\n"
         for i, mem in enumerate(memories, 1):
             memories_context += f"{i}. {mem}\n"
 
@@ -227,10 +235,21 @@ async def generate_roast(message: types.Message, is_mention_or_reply: bool) -> s
         reply_text = reply_to.text or reply_to.caption or "[Медиа/Стикер]"
         reply_context = f"(Ответ на сообщение от {reply_sender}: \"{reply_text}\")\n"
 
+    # Get recent rolling chat history
+    history_list = chat_histories.get(message.chat.id, [])
+    history_context = ""
+    if len(history_list) > 1:
+        history_context = "\nНедавний контекст беседы в группе (чтобы ты понимал тему разговора):\n"
+        # Display up to last 12 messages before the current one
+        for msg in history_list[:-1]:
+            history_context += f"[{msg['sender']}]: {msg['text']}\n"
+
     user_prompt = (
         f"Отправитель в Telegram: {display_name} (Имя: {sender_name}, username: @{username})\n"
         f"Контекст твоих отношений с ним: {relationship}\n"
     )
+    if history_context:
+        user_prompt += history_context
     if reply_context:
         user_prompt += f"Контекст разговора:\n{reply_context}\n"
     user_prompt += f"Его текущее сообщение: \"{message_text}\"\n\nОтветь ему саркастично от лица Мырзы:"
@@ -305,9 +324,26 @@ async def handle_message(message: types.Message):
     bot_info = await bot.get_me()
     bot_username = bot_info.username.lower() if bot_info.username else ""
 
+    # Identify sender and format text
+    sender = message.from_user
+    sender_name = "Кто-то"
+    if sender:
+        identity = get_sender_identity(sender.username, sender.full_name, sender.id)
+        sender_name = identity["name"]
+    
+    msg_text = message.text or message.caption or ""
+
+    # Add message to rolling chat history for this group
+    chat_id = message.chat.id
+    if chat_id not in chat_histories:
+        chat_histories[chat_id] = []
+    chat_histories[chat_id].append({"sender": sender_name, "text": msg_text})
+    if len(chat_histories[chat_id]) > 15:
+        chat_histories[chat_id].pop(0)
+
     # Check if bot is mentioned or if it's a reply to the bot
     is_mentioned = False
-    text_to_check = (message.text or message.caption or "").lower()
+    text_to_check = msg_text.lower()
     if text_to_check:
         is_mentioned = f"@{bot_username}" in text_to_check or "мырза" in text_to_check or "мирза" in text_to_check
     
@@ -331,7 +367,7 @@ async def handle_message(message: types.Message):
 
     if should_reply:
         # Typing indicator for premium feel
-        await bot.send_chat_action(chat_id=message.chat.id, action="typing")
+        await bot.send_chat_action(chat_id=chat_id, action="typing")
         
         # Artificial delay to make it feel human (0.5 to 2 seconds)
         await asyncio.sleep(random.uniform(0.5, 2.0))
