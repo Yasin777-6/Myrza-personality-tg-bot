@@ -1,0 +1,15 @@
+# Local configuration and credentials
+.env
+
+# Local database/memories
+memories.json
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Operating system files
+.DS_Store
+Thumbs.db
