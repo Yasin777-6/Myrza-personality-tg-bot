@@ -290,7 +290,7 @@ async def handle_message(message: types.Message):
     is_mentioned = False
     text_to_check = (message.text or message.caption or "").lower()
     if text_to_check:
-        is_mentioned = f"@{bot_username}" in text_to_check or "мырза" in text_to_check
+        is_mentioned = f"@{bot_username}" in text_to_check or "мырза" in text_to_check or "мирза" in text_to_check
     
     is_reply_to_bot = False
     if message.reply_to_message and message.reply_to_message.from_user:
