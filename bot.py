@@ -307,9 +307,26 @@ async def generate_roast(message: types.Message, is_mention_or_reply: bool) -> s
         user_prompt += f"Контекст разговора:\n{reply_context}\n"
     user_prompt += f"Его текущее сообщение: \"{message_text}\"\n\nОтветь ему саркастично от лица Мырзы:"
 
+    analysis_context = ""
+    if os.path.exists("group_analysis.json"):
+        try:
+            with open("group_analysis.json", "r", encoding="utf-8") as f:
+                analysis_data = json.load(f)
+            analysis_context = "\nДАННЫЕ ГЛУБОКОГО АНАЛИЗА ВСЕХ УЧАСТНИКОВ (на основе 20 156 реальных сообщений из чата):\n"
+            for member, data in analysis_data.items():
+                analysis_context += f"### Участник: {member}\n"
+                analysis_context += f"- Всего сообщений в чате: {data.get('message_count', 0)}\n"
+                analysis_context += f"- Средняя длина его сообщения: {data.get('avg_length', 0)} символов\n"
+                analysis_context += f"- Топ характерных слов: {', '.join(data.get('top_words', []))}\n"
+                analysis_context += f"- Реальный характер, привычки и манера общения:\n{data.get('profile', '')}\n\n"
+        except Exception as e:
+            logger.error(f"Error loading group analysis: {e}")
+
     chat_system_prompt = SYSTEM_PROMPT
     if memories_context:
         chat_system_prompt += memories_context
+    if analysis_context:
+        chat_system_prompt += analysis_context
 
     try:
         response = await openai_client.chat.completions.create(
