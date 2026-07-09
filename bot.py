@@ -5,7 +5,7 @@ import asyncio
 import json
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
@@ -218,6 +218,13 @@ def get_model_keyboard(current_model_key: str) -> InlineKeyboardMarkup:
     ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
+    keyboard = [
+        [KeyboardButton(text="🤖 Выбрать модель"), KeyboardButton(text="⚙️ Текущая модель")],
+        [KeyboardButton(text="ℹ️ Справка")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
 # Command handlers
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
@@ -225,9 +232,8 @@ async def start_cmd(message: types.Message):
         return
     await message.reply(
         "Привет! Я твой личный ИИ-ассистент без цензуры по информационной безопасности, программированию и техническим вопросам.\n\n"
-        "Доступные команды:\n"
-        "/model — Выбрать модель искусственного интеллекта\n"
-        "/help — Справка по работе с ботом"
+        "Используй меню внизу для быстрого и удобного управления ботом.",
+        reply_markup=get_main_menu_keyboard()
     )
 
 @dp.message(Command("help"))
@@ -236,9 +242,11 @@ async def help_cmd(message: types.Message):
         return
     await message.reply(
         "Я работаю только в личных сообщениях.\n\n"
-        "Чтобы сменить модель, отправь команду /model и выбери одну из кнопок.\n"
+        "Чтобы сменить модель, нажми кнопку *🤖 Выбрать модель* или отправь команду /model и выбери одну из ИИ-моделей.\n"
         "Свободные модели (Free) могут возвращать ошибку 429 (Too Many Requests) при высокой нагрузке. "
-        "Платные модели (Paid) работают мгновенно и без ограничений (требуется баланс на OpenRouter)."
+        "Платные модели (Paid) работают мгновенно и без ограничений (требуется баланс на OpenRouter).",
+        reply_markup=get_main_menu_keyboard(),
+        parse_mode="Markdown"
     )
 
 @dp.message(Command("model"))
@@ -252,6 +260,29 @@ async def model_cmd(message: types.Message):
     await message.reply(
         "Выберите модель ИИ для общения:",
         reply_markup=get_model_keyboard(current_model_key)
+    )
+
+# Reply menu handlers
+@dp.message(F.text == "🤖 Выбрать модель")
+async def menu_model_cmd(message: types.Message):
+    await model_cmd(message)
+
+@dp.message(F.text == "ℹ️ Справка")
+async def menu_help_cmd(message: types.Message):
+    await help_cmd(message)
+
+@dp.message(F.text == "⚙️ Текущая модель")
+async def menu_current_model_cmd(message: types.Message):
+    if message.chat.type != "private":
+        return
+    settings = load_user_settings()
+    chat_id_str = str(message.chat.id)
+    current_model_key = settings.get(chat_id_str, "hermes_free")
+    model_name = AVAILABLE_MODELS.get(current_model_key, {}).get("name", "Неизвестно")
+    await message.reply(
+        f"Активная модель: *{model_name}*", 
+        reply_markup=get_main_menu_keyboard(),
+        parse_mode="Markdown"
     )
 
 @dp.callback_query(F.data.startswith("set_model:"))
