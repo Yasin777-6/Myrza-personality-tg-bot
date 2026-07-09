@@ -346,7 +346,7 @@ async def handle_message(message: types.Message):
     reply_text = await generate_response(message, model_id)
     
     if reply_text:
-        await message.reply(reply_text)
+        await message.reply(reply_text, reply_markup=get_main_menu_keyboard())
         # Save bot's response to history
         append_to_history_file(chat_id, "AI Assistant", reply_text)
 
